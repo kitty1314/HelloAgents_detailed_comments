@@ -5,7 +5,7 @@
 
 框架
 
-helloagents-learning-notes/
+HelloAgents_detailed_comments/
 ├── README.md
 ├── notes/
 │   ├── Chapter 7 code note/
