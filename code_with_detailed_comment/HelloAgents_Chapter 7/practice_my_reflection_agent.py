@@ -1,0 +1,209 @@
+DEFAULT_PROMPTS = {
+
+    "initial": """
+请根据以下要求完成任务:
+
+任务: {task}
+
+请提供一个完整、准确的回答。
+""",
+    "reflect": """
+请仔细审查以下回答，并找出可能的问题或改进空间:
+
+# 原始任务:
+{task}
+
+# 当前回答:
+{content}
+
+请分析这个回答的质量，指出不足之处，并提出具体的改进建议。
+如果回答已经很好，请回答"无需改进"。
+""",
+    "refine": """
+请根据反馈意见改进你的回答:
+
+# 原始任务:
+{task}
+
+# 上一轮回答:
+{last_attempt}
+
+# 反馈意见:
+{feedback}
+
+请提供一个改进后的回答。
+"""
+}
+
+import re
+from typing import Optional, List, Dict, Any
+from hello_agents import ReflectionAgent, HelloAgentsLLM, Config, Message, ToolRegistry
+
+from typing import List, Dict, Any, Optional
+
+class Memory:
+    """
+    一个简单的短期记忆模块，用于存储智能体的行动与反思轨迹。
+    """
+
+    def __init__(self):
+        """
+        初始化一个空列表来存储所有记录。
+        构造函数，在java里等于
+        public class Memory {  // 假设这个类叫 Memory
+        private List<Map<String, Object>> records;
+
+         public Memory() {  // 这就是 __init__，构造函数
+            this.records = new ArrayList<>();  // 初始化一个空列表
+            }
+        }
+        """
+        self.records: List[Dict[str, Any]] = []
+
+        """self.records = [] 就是给这个对象装一个空的列表，用来存后续的数据。"""
+
+    def add_record(self, record_type: str, content: str):
+        """
+        向记忆中添加一条新记录。
+
+        参数:
+        - record_type (str): 记录的类型 ('execution' 或 'reflection')。
+        - content (str): 记录的具体内容 (例如，生成的代码或反思的反馈)。
+        """
+        record = {"type": record_type, "content": content}
+
+        """
+        等价java里的
+        private List<Map<String, Object>> records = new ArrayList<>();
+
+            public void addRecord(String recordType, String content) {
+                Map<String, Object> record = new HashMap<>();
+                record.put("type", recordType);
+                record.put("content", content);
+                this.records.add(record);
+            }
+            
+            两者的数据结构完全相同：一个列表，里面装着一堆小字典（Map），每个小字典有两个键：type 和 content。
+        """
+
+        self.records.append(record)
+        print(f"📝 记忆已更新，新增一条 '{record_type}' 记录。")
+
+    def get_trajectory(self) -> str:
+        """
+        将所有记忆记录格式化为一个连贯的字符串文本，用于构建提示词。
+        trajectory - 》 轨迹
+        """
+        trajectory_parts = []
+        for record in self.records:
+            if record['type'] == 'execution':
+                trajectory_parts.append(f"--- 上一轮尝试 (代码) ---\n{record['content']}")
+            elif record['type'] == 'reflection':
+                trajectory_parts.append(f"--- 评审员反馈 ---\n{record['content']}")
+
+        return "\n\n".join(trajectory_parts)
+
+    def get_last_execution(self) -> Optional[str]:
+        """
+        获取最近一次的执行结果 (例如，最新生成的代码)。
+        如果不存在，则返回 None。
+        """
+        for record in reversed(self.records):
+            if record['type'] == 'execution':
+                return record['content']
+        return None
+
+
+class MyReflectionAgent(ReflectionAgent):
+
+    """测试用例 重写reflection"""
+
+
+    def __init__(
+            self,
+            name: str,
+            llm: HelloAgentsLLM,
+            system_prompt: Optional[str] = None,
+            config: Optional[Config] = None,
+            max_iterations: int = 3,
+            custom_prompts: Optional[Dict[str, str]] = None
+    ):
+        super().__init__(name, llm, system_prompt, config)
+        self.max_iterations = max_iterations
+        self.memory = Memory()
+
+        # 设置提示词模板：用户自定义优先，否则使用默认模板
+        self.prompts = custom_prompts if custom_prompts else DEFAULT_PROMPTS
+
+    def run(self, input_text: str, **kwargs) -> str:
+        """
+        运行Reflection Agent
+
+        Args:
+            input_text: 任务描述
+            **kwargs: 其他参数
+
+        Returns:
+            最终优化后的结果
+        """
+
+
+        print(f"\n🤖 {self.name} 开始处理任务: {input_text}")
+        self.memory=Memory()
+
+        """第一段 - initial提取与执行
+        用字典把promote里面的东西提取出来
+        调用这个initial作为input去返回结果
+        把结果作为"execution" 存储"""
+
+        print("\n正在进行初次尝试")
+        initial_prompt = self.prompts["initial"].format(task=input_text)
+        initial_result = self._get_llm_response(initial_prompt,**kwargs)
+        self.memory.add_record("execution", initial_result)
+
+
+        """第二部分是reflection 循环的部分
+        外面套一个大for用来保障不会超出最大步数，内使用print i+1来展示到底是第几轮迭代
+
+        反思part：将目前的最近一次execution取出，用format字典方法，提取prompt中对于reflection当要求，task为input_text，content为最近一次的execution，组成reflection prompt的全部。
+        将reflection prompt投入，得到feedback，并将其一并加入memory。
+
+        判断feedback里面是否有“无需改进”或者“no need for improvement”，使用.lower()避免大小写问题。如果里面有这种字样，直接掐停。
+
+        如果没有，进入优化阶段。将"refine"的提示词从prompt中取出，使用format插入input_text，上一次的execution结果，feedback，并且将refine prompt投入llm得到结果，将其加入execution部分。
+
+        for结束后，将最后一次execution结果作为final_result，print出来
+        （remind：{}表达式是f- string的写法，使用时要在双引号外的开头加一个f）"""
+
+        for i in range(self.max_iterations):
+            print(f"n/正在进行第{i+1}次迭代/")
+            #进行反思
+            last_execution = self.memory.get_last_execution()
+            reflect_prompt = self.prompts["reflect"].format(task=input_text,content=last_execution)
+            feedback = self._get_llm_response(reflect_prompt,**kwargs)
+            self.memory.add_record("reflection", feedback)
+
+            if "无需改进" or "no need for improvement" in feedback:
+                print("n/系统认为任务无需改进，结束。")
+                break
+
+            """进入优化阶段"""
+
+            refine_prompt = self.prompts["refine"].format(task=input_text,content=last_execution,feedback=feedback)
+            refine_result = self._get_llm_response(refine_prompt,**kwargs)
+            self.memory.add_record("execution", refine_result)
+
+        output_text = self.memory.get_last_execution()
+
+        print(f"\n--- 任务完成 ---\n最终结果:\n{output_text}")
+        self.add_message(Message(input_text, "user"))
+        self.add_message(Message(output_text, "assistant"))
+
+        return output_text
+
+    """保存 input 和final_result 到message内并返回"""
+
+
+
+
+
