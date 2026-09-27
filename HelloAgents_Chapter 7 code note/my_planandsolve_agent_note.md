@@ -30,35 +30,40 @@ class Planner:
         messages = [{"role": "user", "content": plan_text}]  
         print("--- 正在生成计划 ---")  
         plan_result = self.llm_client.invoke(messages, **kwargs)  
-        print("--- 计划已生成 ---")  
-  
+        print("--- 计划已生成 ---")
+```  
+   这里我们用用try-catch方法做错误处理，因为提示词里已经要求```python["步骤1", "步骤2", "步骤3", ...]  
+            的输出格式，所以用split("```python")以```python为分隔切开，得到：
+            [
+                "\n计划如下：\n\n",
+                '\n["搜索相关资料", "整理重点", "生成答案"]\n```\n'
+            ]
+            
+            取 [1]，就是取 Python 代码块开始标记后面的内容：
+            '\n["搜索相关资料", "整理重点", "生成答案"]\n```\n'
+            
+            接着：
+                .split("```")[0]
+                再按结束标记 ``` 切开，只取前半段：
+                '\n["搜索相关资料", "整理重点", "生成答案"]\n'
+            最后：
+                .strip()
+                去掉首尾空白和换行，最终：
+                plan_str = '["搜索相关资料", "整理重点", "生成答案"]'
+                
+            注意：
+                此时 plan_str 仍然只是一个字符串。
+                plan = ast.literal_eval(plan_str)
+                把“长得像 Python 列表的字符串”转换为真实列表：
+                plan = ["搜索相关资料", "整理重点", "生成答案"]   
+            
+            return plan if isinstance(plan, list) else [] 确认解析结果真的是列表：
+                - 是列表：返回 plan；
+                - 不是列表：返回空列表 []。
+	``` python
+            
         try:  
-            """用try-catch方法做错误处理，因为提示词里已经要求```python["步骤1", "步骤
-            2", "步骤3", ...]的输出格式，所以用split("```python")以```python为分隔切
-            开，得到：  
-            
-            ["\n计划如下：\n\n",
-                '\n["搜索相关资料", "整理重点", "生成答案"]\n```\n'  
-            ] 
-            
-            取 [1]，就是取 Python 代码块开始标记后面的内容：  
-            '\n["搜索相关资料", "整理重点", "生成答案"]\n```\n'  
-            接着：  
-                .split("```")[0]再按结束标记 ``` 切开，只取前半段：  
-                '\n["搜索相关资料", "整理重点", "生成答案"]\n'  
-            最后：  
-                .strip()                去掉首尾空白和换行，最终：  
-                plan_str = '["搜索相关资料", "整理重点", "生成答案"]'  
-                注意：  
-                此时 plan_str 仍然只是一个字符串。  
-                plan = ast.literal_eval(plan_str) 把“长得像 Python 列表的字符串”转换
-                为真实列表plan = ["搜索相关资料", "整理重点", "生成答案"]
-                     
-			return plan if isinstance(plan, list) else [] 确认解析结果真的是列表：  
-                - 是列表：返回 plan；  
-                - 不是列表：返回空列表 []
-                  
-            """            plan_str = plan_result.split("```python")[1].split("```")[0].strip()  
+            plan_str = plan_result.split("```python")[1].split("```")[0].strip()  
             plan = ast.literal_eval(plan_str)  
             return plan if isinstance(plan, list) else []  
   
