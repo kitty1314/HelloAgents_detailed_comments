@@ -31,9 +31,10 @@ class Planner:
         print("--- 正在生成计划 ---")  
         plan_result = self.llm_client.invoke(messages, **kwargs)  
         print("--- 计划已生成 ---")
-```  
-   这里我们用用try-catch方法做错误处理，因为提示词里已经要求 python["步骤1", "步骤2", "步骤3", ...]  
-            的输出格式，所以用split("```python")以 "```python"为分隔切开，得到：
+```
+
+   这里我们用try-catch方法做错误处理，因为提示词里已经要求 python["步骤1", "步骤2", "步骤3", ...]  
+            的输出格式，所以用split("`python")以 "`python"为分隔切开，得到：
             [
                 "\n计划如下：\n\n",
                 "\n["搜索相关资料", "整理重点", "生成答案"]"
@@ -43,8 +44,8 @@ class Planner:
             "\n["搜索相关资料", "整理重点", "生成答案"]"
             
             接着：
-                .split("```")[0]
-                再按结束标记 "```" 切开，只取前半段：
+                .split("`")[0]
+                再按结束标记 "`" 切开，只取前半段：
                 '\n["搜索相关资料", "整理重点", "生成答案"]\n'
             最后：
                 .strip()
@@ -60,6 +61,9 @@ class Planner:
             return plan if isinstance(plan, list) else [] 确认解析结果真的是列表：
                 - 是列表：返回 plan；
                 - 不是列表：返回空列表 []。
+
+
+
 	``` python
             
         try:  
